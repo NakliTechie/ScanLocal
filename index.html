@@ -642,27 +642,38 @@
             }
 
             async init() {
+                console.log('PaddleOCR: Loading script from CDN...');
                 // Load PaddleOCR from CDN
                 const script = document.createElement('script');
                 script.src = 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/index.min.js';
                 await new Promise((resolve, reject) => {
-                    script.onload = resolve;
-                    script.onerror = reject;
+                    script.onload = () => {
+                        console.log('PaddleOCR: Script loaded');
+                        resolve();
+                    };
+                    script.onerror = (e) => {
+                        console.error('PaddleOCR: Script failed to load', e);
+                        reject(e);
+                    };
                     document.head.appendChild(script);
                 });
 
                 // Initialize PaddleOCR
+                console.log('PaddleOCR: Initializing...');
                 const { PaddleOCR } = window;
                 this.ocr = new PaddleOCR({
                     modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/models/',
                     lang: 'en'
                 });
                 await this.ocr.load();
+                console.log('PaddleOCR: Ready');
                 this.ready = true;
             }
 
             async recognize(imageElement) {
+                console.log('PaddleOCR: Running recognition...');
                 const result = await this.ocr.recognize(imageElement);
+                console.log('PaddleOCR: Result:', result);
                 return {
                     text: result.text || '',
                     boxes: (result.boxes || []).map(box => ({
@@ -690,18 +701,24 @@
             }
 
             async init() {
+                // Load Transformers.js
                 const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                
+                console.log('TrOCR: Loading model Xenova/trocr-base-printed...');
                 this.extractor = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
                     quantized: true,
                     device: 'webgpu'
                 });
+                console.log('TrOCR: Model loaded successfully');
                 this.ready = true;
             }
 
             async recognize(imageElement) {
+                console.log('TrOCR: Running recognition...');
                 const result = await this.extractor(imageElement, {
                     return_timestamps: false
                 });
+                console.log('TrOCR: Result:', result);
                 return {
                     text: result[0]?.generated_text || '',
                     boxes: [] // TrOCR doesn't return bounding boxes
@@ -722,15 +739,21 @@
             }
 
             async init() {
+                console.log('Tesseract: Loading from CDN...');
                 const Tesseract = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+                console.log('Tesseract: Creating worker...');
                 this.worker = await Tesseract.createWorker();
+                console.log('Tesseract: Loading language eng...');
                 await this.worker.loadLanguage('eng');
                 await this.worker.initialize('eng');
+                console.log('Tesseract: Ready');
                 this.ready = true;
             }
 
             async recognize(imageElement) {
+                console.log('Tesseract: Running recognition...');
                 const { data: { text, words } } = await this.worker.recognize(imageElement);
+                console.log('Tesseract: Result:', { text, wordCount: words.length });
                 
                 const boxes = words.map(w => ({
                     x: w.bbox.x0,
@@ -758,7 +781,10 @@
             }
 
             async init() {
+                // Load Transformers.js
                 const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                
+                console.log('Qwen2-VL: Loading model onnx-community/Qwen2-VL-2B-Instruct...');
                 this.extractor = await pipeline(
                     'image-to-text',
                     'onnx-community/Qwen2-VL-2B-Instruct',
@@ -767,14 +793,17 @@
                         device: 'webgpu'
                     }
                 );
+                console.log('Qwen2-VL: Model loaded successfully');
                 this.ready = true;
             }
 
             async recognize(imageElement, prompt = 'Extract all text from this image. Preserve formatting and line breaks.') {
+                console.log('Qwen2-VL: Running recognition with prompt:', prompt);
                 const result = await this.extractor(imageElement, {
                     prompt: prompt,
                     max_new_tokens: 1024
                 });
+                console.log('Qwen2-VL: Result:', result);
                 return {
                     text: result[0]?.generated_text || '',
                     boxes: [] // VLMs don't return bounding boxes
@@ -1023,6 +1052,8 @@
         async function runOCR() {
             if (!state.currentImage) return;
 
+            console.log('runOCR: Starting OCR with engine:', state.currentEngine);
+            
             // Show loading state
             elements.outputText.value = 'Processing...';
             elements.copyBtn.disabled = true;
@@ -1031,10 +1062,15 @@
             try {
                 const engine = state.currentEngine;
                 
+                console.log('runOCR: Engine manager state:', engineManager[engine]);
+                console.log('runOCR: Engine ready?', engineManager[engine].isReady());
+                
                 // Check if engine is ready
                 if (!engineManager[engine].isReady()) {
                     elements.outputText.value = 'Engine not loaded. Please wait...';
+                    console.log('runOCR: Loading engine...');
                     await loadEngine(engine);
+                    console.log('runOCR: Engine loaded, ready?', engineManager[engine].isReady());
                     if (!engineManager[engine].isReady()) {
                         elements.outputText.value = 'Engine failed to load. Please try again or switch engines.';
                         return;
@@ -1042,7 +1078,9 @@
                 }
 
                 // Run OCR with selected engine
+                console.log('runOCR: Calling engineManager.recognize()...');
                 const result = await engineManager.recognize(state.currentImage, engine);
+                console.log('runOCR: Result:', result);
 
                 // Display results
                 elements.outputText.value = result.text || 'No text detected.';
@@ -1121,7 +1159,7 @@
             await loadEngine(state.currentEngine);
 
             // Update GitHub Pages link
-            const repoName = 'browser-ocr';
+            const repoName = 'ScanLocal';
             elements.pagesLink.href = `https://naklitechie.github.io/${repoName}/`;
         }
 
