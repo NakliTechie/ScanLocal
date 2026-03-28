@@ -8,10 +8,11 @@
 
 ## Features
 
-- **Three OCR engines** in one tool:
+- **Four OCR engines** in one tool:
   - 🚀 **Fast (PaddleOCR)** — Best for printed text, ~20 MB, 94.5% accuracy
   - ✍️ **Handwriting (TrOCR)** — SOTA for handwritten text, ~500 MB
-  - 📜 **Legacy (Tesseract)** — Historic scripts, 100+ languages
+  - 📜 **Legacy (Tesseract)** — Historic scripts, 100+ languages, ~25 MB
+  - 🧠 **Smart (Qwen2-VL)** — Complex docs, tables, forms, ~1.3 GB
 
 - **100% client-side** — Your images never leave your device
 - **No dependencies** — Single HTML file, no npm, no bundler
@@ -34,7 +35,11 @@
 ## How to Use
 
 1. **Open** the app in your browser
-2. **Choose an engine** (Fast/Handwriting/Legacy)
+2. **Choose an engine**:
+   - **Fast** for receipts, documents, screenshots
+   - **Handwriting** for handwritten notes
+   - **Legacy** for historic scripts or rare languages
+   - **Smart** for complex layouts, tables, forms
 3. **Drop an image** or click to upload
 4. **Wait** for text extraction
 5. **Copy** the extracted text
@@ -70,6 +75,7 @@ https://naklitechie.github.io/ScanLocal/
 | **OCR Engine 1** | PaddleOCR (PP-OCRv5) via Paddle.js |
 | **OCR Engine 2** | TrOCR via Transformers.js |
 | **OCR Engine 3** | Tesseract.js v5 |
+| **OCR Engine 4** | Qwen2-VL-2B via Transformers.js |
 | **UI** | Custom CSS (NakliTechie design system) |
 | **Hosting** | GitHub Pages |
 
@@ -82,6 +88,7 @@ https://naklitechie.github.io/ScanLocal/
 | PaddleOCR | ~20 MB | 2-5 sec | Instant | Printed text |
 | TrOCR | ~500 MB | 30-60 sec | Instant | Handwriting |
 | Tesseract | ~25 MB/lang | 5-10 sec | Instant | Legacy scripts |
+| Qwen2-VL | ~1.3 GB | 2-5 min | Instant | Complex docs |
 
 ---
 
@@ -174,11 +181,12 @@ See [PLAN.md](PLAN.md) for detailed implementation plan.
 
 **Phase 1 (Current):** Core infrastructure ✅
 - [x] Base HTML skeleton
-- [x] Engine selector UI
+- [x] Engine selector UI (4 engines)
 - [x] Dropzone + preview
 - [ ] PaddleOCR integration
 - [ ] TrOCR integration
 - [ ] Tesseract.js integration
+- [ ] Qwen2-VL integration
 
 **Phase 2:** Engine integration
 **Phase 3:** UI polish

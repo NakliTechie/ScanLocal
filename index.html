@@ -518,6 +518,7 @@
                             <li><strong>🚀 Fast:</strong> PaddleOCR — best for printed text (20 MB)</li>
                             <li><strong>✍️ Handwriting:</strong> TrOCR — accurate on handwriting (500 MB)</li>
                             <li><strong>📜 Legacy:</strong> Tesseract — historic scripts (25 MB)</li>
+                            <li><strong>🧠 Smart:</strong> Qwen2-VL — complex docs, tables, forms (1.3 GB)</li>
                         </ul>
                         <p style="margin-top: 12px; margin-bottom: 0;">Drop an image, wait for processing, then copy the extracted text.</p>
                     </div>
@@ -550,6 +551,12 @@
                     <span class="label">Legacy</span>
                     <span class="sublabel">Tesseract</span>
                     <span class="status-dot" id="tesseractStatus"></span>
+                </button>
+                <button class="engine-tab" data-engine="qwen">
+                    <span class="icon">🧠</span>
+                    <span class="label">Smart</span>
+                    <span class="sublabel">Qwen2-VL</span>
+                    <span class="status-dot" id="qwenStatus"></span>
                 </button>
             </div>
 
@@ -612,10 +619,200 @@
             engines: {
                 paddle: { ready: false, loading: false },
                 trocr: { ready: false, loading: false },
-                tesseract: { ready: false, loading: false }
+                tesseract: { ready: false, loading: false },
+                qwen: { ready: false, loading: false }
             },
             currentImage: null,
             currentBoxes: []
+        };
+
+        // ===== Engine Abstraction Layer =====
+        class OCREngine {
+            async init() { throw new Error('init() not implemented'); }
+            async recognize(image) { throw new Error('recognize() not implemented'); }
+            isReady() { throw new Error('isReady() not implemented'); }
+        }
+
+        // ===== PaddleOCR Engine =====
+        class PaddleOCREngine extends OCREngine {
+            constructor() {
+                super();
+                this.ocr = null;
+                this.ready = false;
+            }
+
+            async init() {
+                // Load PaddleOCR from CDN
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/index.min.js';
+                await new Promise((resolve, reject) => {
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+
+                // Initialize PaddleOCR
+                const { PaddleOCR } = window;
+                this.ocr = new PaddleOCR({
+                    modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/models/',
+                    lang: 'en'
+                });
+                await this.ocr.load();
+                this.ready = true;
+            }
+
+            async recognize(imageElement) {
+                const result = await this.ocr.recognize(imageElement);
+                return {
+                    text: result.text || '',
+                    boxes: (result.boxes || []).map(box => ({
+                        x: box.x,
+                        y: box.y,
+                        width: box.width,
+                        height: box.height,
+                        text: box.text || '',
+                        confidence: box.confidence || 0
+                    }))
+                };
+            }
+
+            isReady() {
+                return this.ready;
+            }
+        }
+
+        // ===== TrOCR Engine =====
+        class TrOCREngine extends OCREngine {
+            constructor() {
+                super();
+                this.extractor = null;
+                this.ready = false;
+            }
+
+            async init() {
+                const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                this.extractor = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
+                    quantized: true,
+                    device: 'webgpu'
+                });
+                this.ready = true;
+            }
+
+            async recognize(imageElement) {
+                const result = await this.extractor(imageElement, {
+                    return_timestamps: false
+                });
+                return {
+                    text: result[0]?.generated_text || '',
+                    boxes: [] // TrOCR doesn't return bounding boxes
+                };
+            }
+
+            isReady() {
+                return this.ready;
+            }
+        }
+
+        // ===== Tesseract Engine =====
+        class TesseractEngine extends OCREngine {
+            constructor() {
+                super();
+                this.worker = null;
+                this.ready = false;
+            }
+
+            async init() {
+                const Tesseract = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+                this.worker = await Tesseract.createWorker();
+                await this.worker.loadLanguage('eng');
+                await this.worker.initialize('eng');
+                this.ready = true;
+            }
+
+            async recognize(imageElement) {
+                const { data: { text, words } } = await this.worker.recognize(imageElement);
+                
+                const boxes = words.map(w => ({
+                    x: w.bbox.x0,
+                    y: w.bbox.y0,
+                    width: w.bbox.x1 - w.bbox.x0,
+                    height: w.bbox.y1 - w.bbox.y0,
+                    text: w.text,
+                    confidence: w.confidence
+                }));
+
+                return { text, boxes };
+            }
+
+            isReady() {
+                return this.ready;
+            }
+        }
+
+        // ===== Qwen2-VL Engine =====
+        class Qwen2VLEngine extends OCREngine {
+            constructor() {
+                super();
+                this.extractor = null;
+                this.ready = false;
+            }
+
+            async init() {
+                const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                this.extractor = await pipeline(
+                    'image-to-text',
+                    'onnx-community/Qwen2-VL-2B-Instruct',
+                    {
+                        quantized: true,
+                        device: 'webgpu'
+                    }
+                );
+                this.ready = true;
+            }
+
+            async recognize(imageElement, prompt = 'Extract all text from this image. Preserve formatting and line breaks.') {
+                const result = await this.extractor(imageElement, {
+                    prompt: prompt,
+                    max_new_tokens: 1024
+                });
+                return {
+                    text: result[0]?.generated_text || '',
+                    boxes: [] // VLMs don't return bounding boxes
+                };
+            }
+
+            isReady() {
+                return this.ready;
+            }
+        }
+
+        // ===== Engine Manager =====
+        const engineManager = {
+            paddle: new PaddleOCREngine(),
+            trocr: new TrOCREngine(),
+            tesseract: new TesseractEngine(),
+            qwen: new Qwen2VLEngine(),
+
+            async switchEngine(engineName) {
+                // Show warning for Qwen2-VL
+                if (engineName === 'qwen' && !this.qwen.isReady()) {
+                    const confirmed = confirm(
+                        '🧠 Smart (Qwen2-VL) is a 1.3 GB model.\n\nFirst download may take 2-5 minutes on slow connections.\n\nContinue?'
+                    );
+                    if (!confirmed) return false;
+                }
+
+                const engine = this[engineName];
+                if (!engine.isReady()) {
+                    await engine.init();
+                }
+                return true;
+            },
+
+            async recognize(image, engineName) {
+                const engine = this[engineName];
+                return await engine.recognize(image);
+            }
         };
 
         // ===== DOM Elements =====
@@ -684,29 +881,46 @@
 
             state.engines[engine].loading = true;
             updateEngineStatus(engine, 'loading');
-            updateStatusBadge('loading', `Loading ${engine}...`);
+            updateStatusBadge('loading', `Loading ${getEngineDisplayName(engine)}...`);
 
             try {
-                // TODO: Implement actual engine loading
-                // This is a placeholder for the engine loading logic
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                const success = await engineManager.switchEngine(engine);
+                
+                if (success) {
+                    state.engines[engine].ready = true;
+                    state.engines[engine].loading = false;
+                    updateEngineStatus(engine, 'ready');
 
-                state.engines[engine].ready = true;
-                state.engines[engine].loading = false;
-                updateEngineStatus(engine, 'ready');
+                    if (engine === state.currentEngine) {
+                        updateStatusBadge('ready', 'Ready');
+                    }
 
-                // Update main status if this is the current engine
-                if (engine === state.currentEngine) {
-                    updateStatusBadge('ready', 'Ready');
+                    console.log(`${engine} loaded successfully`);
+                } else {
+                    // User cancelled (Qwen2-VL warning)
+                    state.engines[engine].loading = false;
+                    updateEngineStatus(engine, '');
+                    // Revert to previous engine in UI
+                    elements.engineTabs.forEach(tab => {
+                        tab.classList.toggle('active', tab.dataset.engine === state.currentEngine);
+                    });
                 }
-
-                console.log(`${engine} loaded successfully`);
             } catch (error) {
                 state.engines[engine].loading = false;
                 updateEngineStatus(engine, 'error');
                 updateStatusBadge('error', 'Failed to load');
                 console.error(`Failed to load ${engine}:`, error);
             }
+        }
+
+        function getEngineDisplayName(engine) {
+            const names = {
+                paddle: 'PaddleOCR',
+                trocr: 'TrOCR',
+                tesseract: 'Tesseract',
+                qwen: 'Qwen2-VL'
+            };
+            return names[engine] || engine;
         }
 
         function updateEngineStatus(engine, status) {
@@ -812,24 +1026,38 @@
             // Show loading state
             elements.outputText.value = 'Processing...';
             elements.copyBtn.disabled = true;
+            elements.overlaySvg.innerHTML = '';
 
-            // TODO: Implement actual OCR with selected engine
-            // This is a placeholder
-            await new Promise(resolve => setTimeout(resolve, 500));
+            try {
+                const engine = state.currentEngine;
+                
+                // Check if engine is ready
+                if (!engineManager[engine].isReady()) {
+                    elements.outputText.value = 'Engine not loaded. Please wait...';
+                    await loadEngine(engine);
+                    if (!engineManager[engine].isReady()) {
+                        elements.outputText.value = 'Engine failed to load. Please try again or switch engines.';
+                        return;
+                    }
+                }
 
-            // Placeholder result
-            const result = {
-                text: '[OCR result will appear here]\n\nThis is a placeholder. The actual OCR engine integration is coming in Phase 2.',
-                boxes: []
-            };
+                // Run OCR with selected engine
+                const result = await engineManager.recognize(state.currentImage, engine);
 
-            elements.outputText.value = result.text;
-            elements.copyBtn.disabled = false;
-            state.currentBoxes = result.boxes;
+                // Display results
+                elements.outputText.value = result.text || 'No text detected.';
+                elements.copyBtn.disabled = !result.text;
+                state.currentBoxes = result.boxes || [];
 
-            // Draw boxes if any
-            if (result.boxes.length > 0) {
-                drawBoxes(result.boxes);
+                // Draw bounding boxes if available
+                if (result.boxes && result.boxes.length > 0) {
+                    drawBoxes(result.boxes);
+                }
+
+                console.log(`OCR completed with ${engine} engine`);
+            } catch (error) {
+                console.error('OCR error:', error);
+                elements.outputText.value = 'Error: ' + error.message;
             }
         }
 
@@ -882,7 +1110,7 @@
         async function init() {
             // Load saved engine preference
             const savedEngine = localStorage.getItem('scanlocal-engine');
-            if (savedEngine && ['paddle', 'trocr', 'tesseract'].includes(savedEngine)) {
+            if (savedEngine && ['paddle', 'trocr', 'tesseract', 'qwen'].includes(savedEngine)) {
                 state.currentEngine = savedEngine;
                 elements.engineTabs.forEach(tab => {
                     tab.classList.toggle('active', tab.dataset.engine === savedEngine);
