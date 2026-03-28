@@ -701,8 +701,8 @@
             }
 
             async init() {
-                // Load Transformers.js - it exports a default object with pipeline
-                const Transformers = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                // Load Transformers.js from CDN (URL-encoded package name)
+                const Transformers = await import('https://cdn.jsdelivr.net/npm/%40xenova/transformers@3.0.0/dist/transformers.min.js');
                 const { pipeline } = Transformers;
                 
                 if (!pipeline) {
@@ -749,7 +749,9 @@
                 const Tesseract = TesseractModule.default || TesseractModule;
                 
                 console.log('Tesseract: Creating worker...');
-                this.worker = await Tesseract.createWorker();
+                this.worker = await Tesseract.createWorker({
+                    logger: (m) => console.log('Tesseract worker:', m)
+                });
                 console.log('Tesseract: Loading language eng...');
                 await this.worker.loadLanguage('eng');
                 await this.worker.initialize('eng');
@@ -788,8 +790,8 @@
             }
 
             async init() {
-                // Load Transformers.js - it exports a default object with pipeline
-                const Transformers = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                // Load Transformers.js from CDN (URL-encoded package name)
+                const Transformers = await import('https://cdn.jsdelivr.net/npm/%40xenova/transformers@3.0.0/dist/transformers.min.js');
                 const { pipeline } = Transformers;
                 
                 if (!pipeline) {
