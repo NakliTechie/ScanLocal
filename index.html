@@ -701,9 +701,14 @@
             }
 
             async init() {
-                // Load Transformers.js
-                const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                // Load Transformers.js - it exports a default object with pipeline
+                const Transformers = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                const { pipeline } = Transformers;
                 
+                if (!pipeline) {
+                    throw new Error('Transformers.js did not export pipeline function');
+                }
+
                 console.log('TrOCR: Loading model Xenova/trocr-base-printed...');
                 this.extractor = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
                     quantized: true,
@@ -740,7 +745,9 @@
 
             async init() {
                 console.log('Tesseract: Loading from CDN...');
-                const Tesseract = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+                const TesseractModule = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+                const Tesseract = TesseractModule.default || TesseractModule;
+                
                 console.log('Tesseract: Creating worker...');
                 this.worker = await Tesseract.createWorker();
                 console.log('Tesseract: Loading language eng...');
@@ -781,9 +788,14 @@
             }
 
             async init() {
-                // Load Transformers.js
-                const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                // Load Transformers.js - it exports a default object with pipeline
+                const Transformers = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0/dist/transformers.min.js');
+                const { pipeline } = Transformers;
                 
+                if (!pipeline) {
+                    throw new Error('Transformers.js did not export pipeline function');
+                }
+
                 console.log('Qwen2-VL: Loading model onnx-community/Qwen2-VL-2B-Instruct...');
                 this.extractor = await pipeline(
                     'image-to-text',
@@ -939,6 +951,7 @@
                 updateEngineStatus(engine, 'error');
                 updateStatusBadge('error', 'Failed to load');
                 console.error(`Failed to load ${engine}:`, error);
+                alert(`Failed to load ${getEngineDisplayName(engine)} engine:\n\n${error.message}\n\nCheck the console for details.`);
             }
         }
 
