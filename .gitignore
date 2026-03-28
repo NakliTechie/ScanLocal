@@ -1,0 +1,25 @@
+# Planning files (not part of shipped product)
+PLAN.md
+ideas.md
+IDEAS.md
+NOTES.md
+TODO.md
+.claude/
+
+# Dependencies (if using npm)
+node_modules/
+package-lock.json
+
+# Build artifacts
+dist/
+build/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
