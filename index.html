@@ -824,30 +824,103 @@
         });
 
         // ===== OCR =====
+        let paddleOCR = null;
+        let paddleOCRLoading = false;
+
         async function runOCR() {
             if (!state.currentImage) return;
+
+            const engine = state.currentEngine;
+            console.log('runOCR: Starting with engine:', engine);
 
             // Show loading state
             elements.outputText.value = 'Processing...';
             elements.copyBtn.disabled = true;
+            elements.overlaySvg.innerHTML = '';
 
-            // TODO: Implement actual OCR with selected engine
-            // This is a placeholder
-            await new Promise(resolve => setTimeout(resolve, 500));
+            try {
+                // PaddleOCR integration
+                if (engine === 'paddle') {
+                    // Load PaddleOCR script if not already loaded
+                    if (!paddleOCR && !paddleOCRLoading) {
+                        paddleOCRLoading = true;
+                        updateStatusBadge('loading', 'Loading PaddleOCR...');
+                        
+                        await new Promise((resolve, reject) => {
+                            const script = document.createElement('script');
+                            script.src = 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/index.min.js';
+                            script.onload = () => {
+                                console.log('PaddleOCR script loaded');
+                                resolve();
+                            };
+                            script.onerror = (e) => {
+                                console.error('PaddleOCR script failed:', e);
+                                reject(new Error('Failed to load PaddleOCR script'));
+                            };
+                            document.head.appendChild(script);
+                        });
 
-            // Placeholder result
-            const result = {
-                text: '[OCR result will appear here]\n\nThis is a placeholder. The actual OCR engine integration is coming in Phase 2.',
-                boxes: []
-            };
+                        // Initialize PaddleOCR
+                        try {
+                            paddleOCR = new window.PaddleOCR({
+                                modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/models/',
+                                lang: 'en'
+                            });
+                            await paddleOCR.load();
+                            console.log('PaddleOCR initialized');
+                            updateStatusBadge('ready', 'Ready');
+                        } catch (initError) {
+                            console.error('PaddleOCR init error:', initError);
+                            throw new Error('Failed to initialize PaddleOCR: ' + initError.message);
+                        }
+                    }
 
-            elements.outputText.value = result.text;
-            elements.copyBtn.disabled = false;
-            state.currentBoxes = result.boxes;
+                    // Wait for PaddleOCR to be ready
+                    while (!paddleOCR) {
+                        await new Promise(r => setTimeout(r, 100));
+                    }
 
-            // Draw boxes if any
-            if (result.boxes.length > 0) {
-                drawBoxes(result.boxes);
+                    // Run OCR
+                    console.log('PaddleOCR: Running recognition...');
+                    const result = await paddleOCR.recognize(state.currentImage);
+                    console.log('PaddleOCR result:', result);
+
+                    elements.outputText.value = result.text || 'No text detected.';
+                    elements.copyBtn.disabled = !result.text;
+                    state.currentBoxes = result.boxes || [];
+
+                    // Draw bounding boxes
+                    if (result.boxes && result.boxes.length > 0) {
+                        drawBoxes(result.boxes);
+                    }
+
+                    console.log('OCR completed successfully');
+                    return;
+                }
+
+                // Placeholder for other engines
+                if (engine === 'trocr') {
+                    elements.outputText.value = '✍️ Handwriting (TrOCR) - Coming Soon\n\nThis engine will be optimized for handwritten text recognition.';
+                    elements.copyBtn.disabled = false;
+                    return;
+                }
+
+                if (engine === 'tesseract') {
+                    elements.outputText.value = '📜 Legacy (Tesseract) - Coming Soon\n\nThis engine supports 100+ languages including historic scripts.';
+                    elements.copyBtn.disabled = false;
+                    return;
+                }
+
+                if (engine === 'qwen') {
+                    elements.outputText.value = '🧠 Smart (Qwen2-VL) - Coming Soon\n\nThis engine will handle complex documents, tables, and forms.';
+                    elements.copyBtn.disabled = false;
+                    return;
+                }
+
+            } catch (error) {
+                console.error('OCR error:', error);
+                elements.outputText.value = 'Error: ' + error.message + '\n\nTry refreshing the page or using a different engine.';
+                elements.copyBtn.disabled = false;
             }
         }
 
