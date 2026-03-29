@@ -9,9 +9,9 @@
 ## Features
 
 - **Four OCR engines** in one tool:
-  - 🚀 **Fast (PaddleOCR)** — Best for printed text, ~20 MB, 94.5% accuracy
+  - 📜 **Default (Tesseract)** — Most reliable browser path, broad language support
+  - 🚀 **Fast (PaddleOCR)** — Printed text path via Paddle models
   - ✍️ **Handwriting (TrOCR)** — SOTA for handwritten text, ~500 MB
-  - 📜 **Legacy (Tesseract)** — Historic scripts, 100+ languages, ~25 MB
   - 🧠 **Smart OCR** — Transformer fallback for printed text, no boxes
 
 - **100% client-side** — Your images never leave your device
@@ -36,9 +36,9 @@
 
 1. **Open** the app in your browser
 2. **Choose an engine**:
+   - **Default** for the safest first try in-browser
    - **Fast** for receipts, documents, screenshots
    - **Handwriting** for handwritten notes
-   - **Legacy** for historic scripts or rare languages
    - **Smart** for an alternate transformer-based read on printed text
 3. **Drop an image** or click to upload
 4. **Wait** for text extraction
@@ -85,9 +85,9 @@ https://naklitechie.github.io/ScanLocal/
 
 | Engine | Size | First Load | Cached | Best For |
 |---|---|---|---|---|
+| Tesseract | ~25 MB/lang | 5-10 sec | Instant | Default browser OCR, broad language support |
 | PaddleOCR | ~20 MB | 2-5 sec | Instant | Printed text |
 | TrOCR | ~500 MB | 30-60 sec | Instant | Handwriting |
-| Tesseract | ~25 MB/lang | 5-10 sec | Instant | Legacy scripts |
 | Smart OCR | ~300-500 MB | 20-60 sec | Instant | Alternate printed-text extraction |
 
 ---

@@ -515,10 +515,10 @@
                         <h3>How to use</h3>
                         <p>Extract text from images entirely in your browser — nothing is uploaded.</p>
                         <ul>
-                            <li><strong>🚀 Fast:</strong> PaddleOCR — best for printed text (20 MB)</li>
+                            <li><strong>📜 Default:</strong> Tesseract — most reliable browser engine</li>
+                            <li><strong>🚀 Fast:</strong> PaddleOCR — printed text, experimental browser path</li>
                             <li><strong>✍️ Handwriting:</strong> TrOCR — accurate on handwriting (500 MB)</li>
-                            <li><strong>📜 Legacy:</strong> Tesseract — historic scripts (25 MB)</li>
-                            <li><strong>🧠 Smart:</strong> Transformer OCR — printed text fallback (lightweight)</li>
+                            <li><strong>🧠 Smart:</strong> Transformer OCR — alternate printed-text model</li>
                         </ul>
                         <p style="margin-top: 12px; margin-bottom: 0;">Drop an image, wait for processing, then copy the extracted text.</p>
                     </div>
@@ -534,7 +534,13 @@
         <div class="card">
             <!-- Engine Selector -->
             <div class="engine-selector">
-                <button class="engine-tab active" data-engine="paddle">
+                <button class="engine-tab active" data-engine="tesseract">
+                    <span class="icon">📜</span>
+                    <span class="label">Default</span>
+                    <span class="sublabel">Tesseract</span>
+                    <span class="status-dot" id="tesseractStatus"></span>
+                </button>
+                <button class="engine-tab" data-engine="paddle">
                     <span class="icon">🚀</span>
                     <span class="label">Fast</span>
                     <span class="sublabel">PaddleOCR</span>
@@ -545,12 +551,6 @@
                     <span class="label">Handwriting</span>
                     <span class="sublabel">TrOCR</span>
                     <span class="status-dot" id="trocrStatus"></span>
-                </button>
-                <button class="engine-tab" data-engine="tesseract">
-                    <span class="icon">📜</span>
-                    <span class="label">Legacy</span>
-                    <span class="sublabel">Tesseract</span>
-                    <span class="status-dot" id="tesseractStatus"></span>
                 </button>
                 <button class="engine-tab" data-engine="qwen">
                     <span class="icon">🧠</span>
@@ -615,7 +615,7 @@
     <script type="module">
         // ===== State =====
         const state = {
-            currentEngine: 'paddle',
+            currentEngine: 'tesseract',
             engines: {
                 paddle: { ready: false, loading: false },
                 trocr: { ready: false, loading: false },
@@ -845,8 +845,12 @@
         // ===== OCR =====
         const PADDLE_OCR_VERSION = '1.0.3';
         const PADDLE_OCR_BASE = `https://cdn.jsdelivr.net/npm/paddleocr-browser@${PADDLE_OCR_VERSION}/dist`;
+        const PADDLE_RUNTIME_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js';
+        const OPENCV_URL = 'https://docs.opencv.org/4.8.0/opencv.js';
+        const ESEARCH_OCR_URL = 'https://cdn.jsdelivr.net/npm/esearch-ocr@5.1.5/dist/esearch-ocr.js';
         let paddleOCR = null;
         let paddleOCRLoadPromise = null;
+        let openCvLoadPromise = null;
         let transformersModule = null;
         let transformersLoadPromise = null;
         let trocrPipeline = null;
@@ -881,27 +885,115 @@
             });
         }
 
+        function isOpenCvReady() {
+            return Boolean(window.cv && typeof window.cv.Mat === 'function');
+        }
+
+        async function ensureOpenCv() {
+            if (isOpenCvReady()) return window.cv;
+
+            if (!openCvLoadPromise) {
+                openCvLoadPromise = (async () => {
+                    await loadScriptOnce(OPENCV_URL);
+
+                    if (isOpenCvReady()) {
+                        return window.cv;
+                    }
+
+                    return new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            reject(new Error('OpenCV failed to initialize'));
+                        }, 30000);
+
+                        const attachRuntimeHandler = () => {
+                            if (!window.cv) {
+                                setTimeout(attachRuntimeHandler, 50);
+                                return;
+                            }
+
+                            const previousHandler = window.cv.onRuntimeInitialized;
+                            window.cv.onRuntimeInitialized = () => {
+                                if (typeof previousHandler === 'function') {
+                                    previousHandler();
+                                }
+                                clearTimeout(timeout);
+                                resolve(window.cv);
+                            };
+
+                            if (isOpenCvReady()) {
+                                clearTimeout(timeout);
+                                resolve(window.cv);
+                            }
+                        };
+
+                        attachRuntimeHandler();
+                    });
+                })().catch((error) => {
+                    openCvLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return openCvLoadPromise;
+        }
+
+        function normalisePaddleResult(result) {
+            const lines = Array.isArray(result)
+                ? result
+                : Array.isArray(result?.data)
+                    ? result.data
+                    : Array.isArray(result?.results)
+                        ? result.results
+                        : [];
+
+            const boxes = lines.map((entry) => {
+                const points = entry?.box || entry?.bbox || entry?.points || [];
+                const xs = points.map((point) => point[0]);
+                const ys = points.map((point) => point[1]);
+                const text = entry?.text || entry?.label || entry?.[1]?.[0] || '';
+
+                return {
+                    x: Math.min(...xs),
+                    y: Math.min(...ys),
+                    width: Math.max(...xs) - Math.min(...xs),
+                    height: Math.max(...ys) - Math.min(...ys),
+                    text
+                };
+            }).filter((box) => Number.isFinite(box.x) && Number.isFinite(box.y));
+
+            const text = result?.text
+                || boxes.map((box) => box.text).filter(Boolean).join('\n')
+                || '';
+
+            return { text, boxes };
+        }
+
         async function ensurePaddleOCR() {
             if (paddleOCR) return paddleOCR;
 
             if (!paddleOCRLoadPromise) {
                 paddleOCRLoadPromise = (async () => {
-                    await loadScriptOnce(`${PADDLE_OCR_BASE}/index.min.js`);
+                    await loadScriptOnce(PADDLE_RUNTIME_URL);
+                    await ensureOpenCv();
 
-                    if (!window.PaddleOCR) {
-                        throw new Error('PaddleOCR library did not expose window.PaddleOCR');
+                    const Paddle = await import(ESEARCH_OCR_URL);
+                    const dictResponse = await fetch(`${PADDLE_OCR_BASE}/dict_en.txt`);
+                    if (!dictResponse.ok) {
+                        throw new Error(`Failed to load Paddle dictionary (${dictResponse.status})`);
                     }
 
-                    const instance = new window.PaddleOCR({
-                        modelPath: `${PADDLE_OCR_BASE}/models/`,
-                        lang: 'en'
+                    const dictionary = await dictResponse.text();
+
+                    await Paddle.init({
+                        detPath: `${PADDLE_OCR_BASE}/ppocr_det.onnx`,
+                        recPath: `${PADDLE_OCR_BASE}/rec_en_PP-OCRv3_infer.onnx`,
+                        dic: dictionary,
+                        ort: window.ort,
+                        node: false,
+                        cv: window.cv
                     });
 
-                    if (typeof instance.load === 'function') {
-                        await instance.load();
-                    }
-
-                    paddleOCR = instance;
+                    paddleOCR = Paddle;
                     return paddleOCR;
                 })().catch((error) => {
                     paddleOCRLoadPromise = null;
@@ -939,10 +1031,7 @@
             if (!trocrLoadPromise) {
                 trocrLoadPromise = (async () => {
                     const { pipeline } = await ensureTransformersModule();
-                    trocrPipeline = await pipeline('image-to-text', 'Xenova/trocr-small-handwritten', {
-                        device: 'wasm',
-                        dtype: 'q4'
-                    });
+                    trocrPipeline = await pipeline('image-to-text', 'Xenova/trocr-small-handwritten');
                     return trocrPipeline;
                 })().catch((error) => {
                     trocrLoadPromise = null;
@@ -959,10 +1048,7 @@
             if (!smartOCRLoadPromise) {
                 smartOCRLoadPromise = (async () => {
                     const { pipeline } = await ensureTransformersModule();
-                    smartOCRPipeline = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
-                        device: 'wasm',
-                        dtype: 'q4'
-                    });
+                    smartOCRPipeline = await pipeline('image-to-text', 'Xenova/trocr-small-printed');
                     return smartOCRPipeline;
                 })().catch((error) => {
                     smartOCRLoadPromise = null;
@@ -1042,7 +1128,8 @@
 
                     // Run OCR
                     console.log('PaddleOCR: Running recognition...');
-                    const result = await engineInstance.recognize(state.currentImage);
+                    const rawResult = await engineInstance.ocr(imageSourceForML());
+                    const result = normalisePaddleResult(rawResult);
                     console.log('PaddleOCR result:', result);
 
                     elements.outputText.value = result.text || 'No text detected.';
@@ -1168,7 +1255,19 @@
             }
 
             // Load the selected engine
-            await loadEngine(state.currentEngine);
+            try {
+                await loadEngine(state.currentEngine);
+            } catch (error) {
+                console.warn(`Initial engine failed to load: ${state.currentEngine}`, error);
+                if (state.currentEngine !== 'tesseract') {
+                    state.currentEngine = 'tesseract';
+                    localStorage.setItem('scanlocal-engine', 'tesseract');
+                    elements.engineTabs.forEach(tab => {
+                        tab.classList.toggle('active', tab.dataset.engine === 'tesseract');
+                    });
+                    await loadEngine('tesseract');
+                }
+            }
 
             // Update GitHub Pages link
             const repoName = 'ScanLocal';
