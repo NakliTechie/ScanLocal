@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="author" content="Chirag Patnaik">
-    <meta name="description" content="Browser-native OCR with three engines: PaddleOCR (fast), TrOCR (handwriting), Tesseract (legacy). Extract text from images entirely in your browser — no upload, no API keys, no privacy concerns.">
+    <meta name="description" content="Browser-native OCR with four engines: PaddleOCR (fast), TrOCR (handwriting), Tesseract (legacy), and Smart OCR for printed text. Extract text from images entirely in your browser — no upload, no API keys, no privacy concerns.">
     <title>ScanLocal — Browser-Native OCR</title>
     <style>
         /* ===== Design System (from IDEAS.md) ===== */
@@ -518,7 +518,7 @@
                             <li><strong>🚀 Fast:</strong> PaddleOCR — best for printed text (20 MB)</li>
                             <li><strong>✍️ Handwriting:</strong> TrOCR — accurate on handwriting (500 MB)</li>
                             <li><strong>📜 Legacy:</strong> Tesseract — historic scripts (25 MB)</li>
-                            <li><strong>🧠 Smart:</strong> Qwen2-VL — complex docs, tables (1.3 GB) - Coming Soon</li>
+                            <li><strong>🧠 Smart:</strong> Transformer OCR — printed text fallback (lightweight)</li>
                         </ul>
                         <p style="margin-top: 12px; margin-bottom: 0;">Drop an image, wait for processing, then copy the extracted text.</p>
                     </div>
@@ -555,7 +555,7 @@
                 <button class="engine-tab" data-engine="qwen">
                     <span class="icon">🧠</span>
                     <span class="label">Smart</span>
-                    <span class="sublabel">Qwen2-VL</span>
+                    <span class="sublabel">Smart OCR</span>
                     <span class="status-dot" id="qwenStatus"></span>
                 </button>
             </div>
@@ -668,62 +668,80 @@
         async function switchEngine(engine) {
             if (state.currentEngine === engine) return;
 
-            state.currentEngine = engine;
-            
-            // Save preference
-            localStorage.setItem('scanlocal-engine', engine);
+            const previousEngine = state.currentEngine;
 
-            // Update UI tabs
-            elements.engineTabs.forEach(tab => {
-                tab.classList.toggle('active', tab.dataset.engine === engine);
-            });
+            try {
+                await loadEngine(engine);
+                state.currentEngine = engine;
 
-            // Load engine if not already loaded
-            await loadEngine(engine);
+                // Save preference
+                localStorage.setItem('scanlocal-engine', engine);
 
-            // Re-run OCR if image exists
-            if (state.currentImage) {
-                runOCR();
+                // Update UI tabs
+                elements.engineTabs.forEach(tab => {
+                    tab.classList.toggle('active', tab.dataset.engine === engine);
+                });
+
+                // Re-run OCR if image exists
+                if (state.currentImage) {
+                    await runOCR();
+                }
+            } catch (error) {
+                state.currentEngine = previousEngine;
+                elements.engineTabs.forEach(tab => {
+                    tab.classList.toggle('active', tab.dataset.engine === previousEngine);
+                });
+                console.error(`Failed to switch to ${engine}:`, error);
             }
         }
 
-        async function loadEngine(engine) {
-            if (state.engines[engine].ready || state.engines[engine].loading) return;
+        function getEngineLabel(engine) {
+            return {
+                paddle: 'PaddleOCR',
+                trocr: 'TrOCR',
+                tesseract: 'Tesseract',
+                qwen: 'Smart OCR'
+            }[engine] || engine;
+        }
 
-            // Show "Coming Soon" for Qwen2-VL
-            if (engine === 'qwen') {
-                alert('🧠 Smart (Qwen2-VL) - Coming Soon!\n\nThis engine will support:\n• Complex document layouts\n• Tables and forms\n• Context-aware extraction\n• Multi-column documents\n\nFor now, please use one of the other engines.');
-                // Revert UI to previous engine
-                elements.engineTabs.forEach(tab => {
-                    tab.classList.toggle('active', tab.dataset.engine === state.currentEngine);
-                });
-                return;
-            }
+        async function loadEngine(engine) {
+            if (state.engines[engine].ready) return true;
+            if (state.engines[engine].loading) return false;
 
             state.engines[engine].loading = true;
             updateEngineStatus(engine, 'loading');
-            updateStatusBadge('loading', `Loading ${engine}...`);
+            updateStatusBadge('loading', `Loading ${getEngineLabel(engine)}...`);
 
             try {
-                // TODO: Implement actual engine loading
-                // This is a placeholder for the engine loading logic
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (engine === 'paddle') {
+                    await ensurePaddleOCR();
+                } else if (engine === 'trocr') {
+                    await ensureTrOCR();
+                } else if (engine === 'tesseract') {
+                    await ensureTesseractWorker();
+                } else if (engine === 'qwen') {
+                    await ensureSmartOCR();
+                } else {
+                    throw new Error(`Unknown engine: ${engine}`);
+                }
 
                 state.engines[engine].ready = true;
-                state.engines[engine].loading = false;
                 updateEngineStatus(engine, 'ready');
 
                 // Update main status if this is the current engine
-                if (engine === state.currentEngine) {
-                    updateStatusBadge('ready', 'Ready');
+                if (engine === state.currentEngine || !state.currentImage) {
+                    updateStatusBadge('ready', `${getEngineLabel(engine)} ready`);
                 }
 
                 console.log(`${engine} loaded successfully`);
+                return true;
             } catch (error) {
-                state.engines[engine].loading = false;
                 updateEngineStatus(engine, 'error');
-                updateStatusBadge('error', 'Failed to load');
+                updateStatusBadge('error', `Failed to load ${getEngineLabel(engine)}`);
                 console.error(`Failed to load ${engine}:`, error);
+                throw error;
+            } finally {
+                state.engines[engine].loading = false;
             }
         }
 
@@ -825,7 +843,182 @@
 
         // ===== OCR =====
         let paddleOCR = null;
-        let paddleOCRLoading = false;
+        let paddleOCRLoadPromise = null;
+        let transformersModule = null;
+        let transformersLoadPromise = null;
+        let trocrPipeline = null;
+        let trocrLoadPromise = null;
+        let smartOCRPipeline = null;
+        let smartOCRLoadPromise = null;
+        let tesseractWorker = null;
+        let tesseractLoadPromise = null;
+
+        function loadScriptOnce(src) {
+            const existing = document.querySelector(`script[data-src="${src}"]`);
+            if (existing) {
+                return existing.dataset.loaded === 'true'
+                    ? Promise.resolve()
+                    : new Promise((resolve, reject) => {
+                        existing.addEventListener('load', () => resolve(), { once: true });
+                        existing.addEventListener('error', () => reject(new Error(`Failed to load script: ${src}`)), { once: true });
+                    });
+            }
+
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = true;
+                script.dataset.src = src;
+                script.onload = () => {
+                    script.dataset.loaded = 'true';
+                    resolve();
+                };
+                script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+                document.head.appendChild(script);
+            });
+        }
+
+        async function ensurePaddleOCR() {
+            if (paddleOCR) return paddleOCR;
+
+            if (!paddleOCRLoadPromise) {
+                paddleOCRLoadPromise = (async () => {
+                    await loadScriptOnce('https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/index.min.js');
+
+                    if (!window.PaddleOCR) {
+                        throw new Error('PaddleOCR library did not expose window.PaddleOCR');
+                    }
+
+                    const instance = new window.PaddleOCR({
+                        modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/models/',
+                        lang: 'en'
+                    });
+
+                    if (typeof instance.load === 'function') {
+                        await instance.load();
+                    }
+
+                    paddleOCR = instance;
+                    return paddleOCR;
+                })().catch((error) => {
+                    paddleOCRLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return paddleOCRLoadPromise;
+        }
+
+        async function ensureTransformersModule() {
+            if (transformersModule) return transformersModule;
+
+            if (!transformersLoadPromise) {
+                transformersLoadPromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1')
+                    .then((mod) => {
+                        if (mod.env?.backends?.onnx?.wasm) {
+                            mod.env.backends.onnx.wasm.numThreads = 1;
+                        }
+                        transformersModule = mod;
+                        return mod;
+                    })
+                    .catch((error) => {
+                        transformersLoadPromise = null;
+                        throw error;
+                    });
+            }
+
+            return transformersLoadPromise;
+        }
+
+        async function ensureTrOCR() {
+            if (trocrPipeline) return trocrPipeline;
+
+            if (!trocrLoadPromise) {
+                trocrLoadPromise = (async () => {
+                    const { pipeline } = await ensureTransformersModule();
+                    trocrPipeline = await pipeline('image-to-text', 'Xenova/trocr-small-handwritten', {
+                        device: 'wasm',
+                        dtype: 'q4'
+                    });
+                    return trocrPipeline;
+                })().catch((error) => {
+                    trocrLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return trocrLoadPromise;
+        }
+
+        async function ensureSmartOCR() {
+            if (smartOCRPipeline) return smartOCRPipeline;
+
+            if (!smartOCRLoadPromise) {
+                smartOCRLoadPromise = (async () => {
+                    const { pipeline } = await ensureTransformersModule();
+                    smartOCRPipeline = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
+                        device: 'wasm',
+                        dtype: 'q4'
+                    });
+                    return smartOCRPipeline;
+                })().catch((error) => {
+                    smartOCRLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return smartOCRLoadPromise;
+        }
+
+        async function ensureTesseractWorker() {
+            if (tesseractWorker) return tesseractWorker;
+
+            if (!tesseractLoadPromise) {
+                tesseractLoadPromise = (async () => {
+                    await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+
+                    if (!window.Tesseract?.createWorker) {
+                        throw new Error('Tesseract.js did not expose Tesseract.createWorker');
+                    }
+
+                    tesseractWorker = await window.Tesseract.createWorker('eng');
+                    return tesseractWorker;
+                })().catch((error) => {
+                    tesseractLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return tesseractLoadPromise;
+        }
+
+        function normaliseTextResult(result) {
+            if (!result) return '';
+            if (typeof result === 'string') return result;
+            if (Array.isArray(result)) {
+                return result
+                    .map((entry) => entry?.generated_text || entry?.text || '')
+                    .filter(Boolean)
+                    .join('\n');
+            }
+            return result.generated_text || result.text || '';
+        }
+
+        function imageSourceForML() {
+            return state.currentImage?.src;
+        }
+
+        function normaliseTesseractBoxes(words = []) {
+            return words
+                .filter((word) => word?.bbox && word?.text?.trim())
+                .map((word) => ({
+                    x: word.bbox.x0,
+                    y: word.bbox.y0,
+                    width: Math.max(0, word.bbox.x1 - word.bbox.x0),
+                    height: Math.max(0, word.bbox.y1 - word.bbox.y0),
+                    text: word.text
+                }));
+        }
 
         async function runOCR() {
             if (!state.currentImage) return;
@@ -841,48 +1034,12 @@
             try {
                 // PaddleOCR integration
                 if (engine === 'paddle') {
-                    // Load PaddleOCR script if not already loaded
-                    if (!paddleOCR && !paddleOCRLoading) {
-                        paddleOCRLoading = true;
-                        updateStatusBadge('loading', 'Loading PaddleOCR...');
-                        
-                        await new Promise((resolve, reject) => {
-                            const script = document.createElement('script');
-                            script.src = 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/index.min.js';
-                            script.onload = () => {
-                                console.log('PaddleOCR script loaded');
-                                resolve();
-                            };
-                            script.onerror = (e) => {
-                                console.error('PaddleOCR script failed:', e);
-                                reject(new Error('Failed to load PaddleOCR script'));
-                            };
-                            document.head.appendChild(script);
-                        });
-
-                        // Initialize PaddleOCR
-                        try {
-                            paddleOCR = new window.PaddleOCR({
-                                modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/models/',
-                                lang: 'en'
-                            });
-                            await paddleOCR.load();
-                            console.log('PaddleOCR initialized');
-                            updateStatusBadge('ready', 'Ready');
-                        } catch (initError) {
-                            console.error('PaddleOCR init error:', initError);
-                            throw new Error('Failed to initialize PaddleOCR: ' + initError.message);
-                        }
-                    }
-
-                    // Wait for PaddleOCR to be ready
-                    while (!paddleOCR) {
-                        await new Promise(r => setTimeout(r, 100));
-                    }
+                    updateStatusBadge('loading', 'Running PaddleOCR...');
+                    const engineInstance = await ensurePaddleOCR();
 
                     // Run OCR
                     console.log('PaddleOCR: Running recognition...');
-                    const result = await paddleOCR.recognize(state.currentImage);
+                    const result = await engineInstance.recognize(state.currentImage);
                     console.log('PaddleOCR result:', result);
 
                     elements.outputText.value = result.text || 'No text detected.';
@@ -894,26 +1051,53 @@
                         drawBoxes(result.boxes);
                     }
 
+                    updateStatusBadge('ready', 'PaddleOCR ready');
                     console.log('OCR completed successfully');
                     return;
                 }
 
-                // Placeholder for other engines
                 if (engine === 'trocr') {
-                    elements.outputText.value = '✍️ Handwriting (TrOCR) - Coming Soon\n\nThis engine will be optimized for handwritten text recognition.';
-                    elements.copyBtn.disabled = false;
+                    updateStatusBadge('loading', 'Running TrOCR...');
+                    const trocr = await ensureTrOCR();
+                    const result = await trocr(imageSourceForML());
+                    const text = normaliseTextResult(result);
+
+                    elements.outputText.value = text || 'No text detected.';
+                    elements.copyBtn.disabled = !text;
+                    state.currentBoxes = [];
+                    updateStatusBadge('ready', 'TrOCR ready');
                     return;
                 }
 
                 if (engine === 'tesseract') {
-                    elements.outputText.value = '📜 Legacy (Tesseract) - Coming Soon\n\nThis engine supports 100+ languages including historic scripts.';
-                    elements.copyBtn.disabled = false;
+                    updateStatusBadge('loading', 'Running Tesseract...');
+                    const worker = await ensureTesseractWorker();
+                    const result = await worker.recognize(imageSourceForML());
+                    const text = result?.data?.text?.trim() || '';
+                    const boxes = normaliseTesseractBoxes(result?.data?.words);
+
+                    elements.outputText.value = text || 'No text detected.';
+                    elements.copyBtn.disabled = !text;
+                    state.currentBoxes = boxes;
+
+                    if (boxes.length > 0) {
+                        drawBoxes(boxes);
+                    }
+
+                    updateStatusBadge('ready', 'Tesseract ready');
                     return;
                 }
 
                 if (engine === 'qwen') {
-                    elements.outputText.value = '🧠 Smart (Qwen2-VL) - Coming Soon\n\nThis engine will handle complex documents, tables, and forms.';
-                    elements.copyBtn.disabled = false;
+                    updateStatusBadge('loading', 'Running Smart OCR...');
+                    const smartOCR = await ensureSmartOCR();
+                    const result = await smartOCR(imageSourceForML());
+                    const text = normaliseTextResult(result);
+
+                    elements.outputText.value = text || 'No text detected.';
+                    elements.copyBtn.disabled = !text;
+                    state.currentBoxes = [];
+                    updateStatusBadge('ready', 'Smart OCR ready');
                     return;
                 }
 
