@@ -738,6 +738,7 @@
             } catch (error) {
                 updateEngineStatus(engine, 'error');
                 updateStatusBadge('error', `Failed to load ${getEngineLabel(engine)}`);
+                elements.outputText.value = `${getEngineLabel(engine)} failed to load.\n\n${error.message}`;
                 console.error(`Failed to load ${engine}:`, error);
                 throw error;
             } finally {
@@ -842,6 +843,8 @@
         });
 
         // ===== OCR =====
+        const PADDLE_OCR_VERSION = '1.0.3';
+        const PADDLE_OCR_BASE = `https://cdn.jsdelivr.net/npm/paddleocr-browser@${PADDLE_OCR_VERSION}/dist`;
         let paddleOCR = null;
         let paddleOCRLoadPromise = null;
         let transformersModule = null;
@@ -883,14 +886,14 @@
 
             if (!paddleOCRLoadPromise) {
                 paddleOCRLoadPromise = (async () => {
-                    await loadScriptOnce('https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/index.min.js');
+                    await loadScriptOnce(`${PADDLE_OCR_BASE}/index.min.js`);
 
                     if (!window.PaddleOCR) {
                         throw new Error('PaddleOCR library did not expose window.PaddleOCR');
                     }
 
                     const instance = new window.PaddleOCR({
-                        modelPath: 'https://cdn.jsdelivr.net/npm/paddleocr-browser@1.0.5/dist/models/',
+                        modelPath: `${PADDLE_OCR_BASE}/models/`,
                         lang: 'en'
                     });
 
