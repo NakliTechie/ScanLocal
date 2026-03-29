@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="author" content="Chirag Patnaik">
-    <meta name="description" content="Browser-native OCR with four engines: PaddleOCR (fast), TrOCR (handwriting), Tesseract (legacy), and Smart OCR for printed text. Extract text from images entirely in your browser — no upload, no API keys, no privacy concerns.">
+    <meta name="description" content="Browser-native OCR with five engines: Tesseract (default), PaddleOCR, TrOCR, Smart OCR, and experimental Qwen2-VL. Extract text from images entirely in your browser — no upload, no API keys, no privacy concerns.">
     <title>ScanLocal — Browser-Native OCR</title>
     <style>
         /* ===== Design System (from IDEAS.md) ===== */
@@ -280,6 +280,45 @@
             border-bottom: 1px solid var(--gray-200);
         }
 
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .control-group.hidden {
+            display: none;
+        }
+
+        .control-group label {
+            font-size: 0.75rem;
+            color: var(--gray-600);
+            font-weight: 600;
+        }
+
+        .control-select {
+            min-width: 180px;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 8px 10px;
+            background: var(--white);
+            color: var(--gray-800);
+            font-size: 0.9rem;
+        }
+
+        .control-note {
+            font-size: 0.75rem;
+            color: var(--gray-400);
+        }
+
         .dropzone {
             border: 2px dashed var(--gray-200);
             border-radius: 12px;
@@ -518,7 +557,8 @@
                             <li><strong>📜 Default:</strong> Tesseract — most reliable browser engine</li>
                             <li><strong>🚀 Fast:</strong> PaddleOCR — printed text, experimental browser path</li>
                             <li><strong>✍️ Handwriting:</strong> TrOCR — accurate on handwriting (500 MB)</li>
-                            <li><strong>🧠 Smart:</strong> Transformer OCR — alternate printed-text model</li>
+                            <li><strong>🧠 Smart:</strong> printed-text transformer OCR</li>
+                            <li><strong>🔭 Qwen:</strong> experimental Qwen2-VL document reader, very large download</li>
                         </ul>
                         <p style="margin-top: 12px; margin-bottom: 0;">Drop an image, wait for processing, then copy the extracted text.</p>
                     </div>
@@ -552,10 +592,16 @@
                     <span class="sublabel">TrOCR</span>
                     <span class="status-dot" id="trocrStatus"></span>
                 </button>
-                <button class="engine-tab" data-engine="qwen">
+                <button class="engine-tab" data-engine="smart">
                     <span class="icon">🧠</span>
                     <span class="label">Smart</span>
                     <span class="sublabel">Smart OCR</span>
+                    <span class="status-dot" id="smartStatus"></span>
+                </button>
+                <button class="engine-tab" data-engine="qwen">
+                    <span class="icon">🔭</span>
+                    <span class="label">Qwen</span>
+                    <span class="sublabel">Qwen2-VL</span>
                     <span class="status-dot" id="qwenStatus"></span>
                 </button>
             </div>
@@ -569,6 +615,26 @@
                     </div>
                     <div class="dropzone-hint">
                         Supports PNG, JPG, WebP • Max 10 MB
+                    </div>
+                </div>
+                <div class="controls-row">
+                    <div class="control-group" id="tesseractLanguageGroup">
+                        <label for="tesseractLanguage">Tesseract Language</label>
+                        <select class="control-select" id="tesseractLanguage">
+                            <option value="eng">English</option>
+                            <option value="spa">Spanish</option>
+                            <option value="fra">French</option>
+                            <option value="deu">German</option>
+                            <option value="ita">Italian</option>
+                            <option value="por">Portuguese</option>
+                            <option value="rus">Russian</option>
+                            <option value="hin">Hindi</option>
+                            <option value="ara">Arabic</option>
+                            <option value="jpn">Japanese</option>
+                            <option value="kor">Korean</option>
+                            <option value="chi_sim">Chinese (Simplified)</option>
+                        </select>
+                        <div class="control-note">Downloaded on demand the first time you use each language.</div>
                     </div>
                 </div>
                 <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp">
@@ -620,10 +686,13 @@
                 paddle: { ready: false, loading: false },
                 trocr: { ready: false, loading: false },
                 tesseract: { ready: false, loading: false },
+                smart: { ready: false, loading: false },
                 qwen: { ready: false, loading: false }
             },
             currentImage: null,
-            currentBoxes: []
+            currentBoxes: [],
+            tesseractLanguage: 'eng',
+            qwenConfirmed: false
         };
 
         // ===== DOM Elements =====
@@ -635,6 +704,8 @@
             engineTabs: document.querySelectorAll('.engine-tab'),
             dropzone: document.getElementById('dropzone'),
             fileInput: document.getElementById('fileInput'),
+            tesseractLanguageGroup: document.getElementById('tesseractLanguageGroup'),
+            tesseractLanguage: document.getElementById('tesseractLanguage'),
             previewSection: document.getElementById('previewSection'),
             previewCanvas: document.getElementById('previewCanvas'),
             overlaySvg: document.getElementById('overlaySvg'),
@@ -665,6 +736,19 @@
             });
         });
 
+        elements.tesseractLanguage.addEventListener('change', async (event) => {
+            state.tesseractLanguage = event.target.value;
+            localStorage.setItem('scanlocal-tesseract-language', state.tesseractLanguage);
+
+            if (state.currentEngine === 'tesseract') {
+                state.engines.tesseract.ready = false;
+                await loadEngine('tesseract');
+                if (state.currentImage) {
+                    await runOCR();
+                }
+            }
+        });
+
         async function switchEngine(engine) {
             if (state.currentEngine === engine) return;
 
@@ -681,6 +765,7 @@
                 elements.engineTabs.forEach(tab => {
                     tab.classList.toggle('active', tab.dataset.engine === engine);
                 });
+                updateVisibleControls();
 
                 // Re-run OCR if image exists
                 if (state.currentImage) {
@@ -691,6 +776,7 @@
                 elements.engineTabs.forEach(tab => {
                     tab.classList.toggle('active', tab.dataset.engine === previousEngine);
                 });
+                updateVisibleControls();
                 console.error(`Failed to switch to ${engine}:`, error);
             }
         }
@@ -700,8 +786,13 @@
                 paddle: 'PaddleOCR',
                 trocr: 'TrOCR',
                 tesseract: 'Tesseract',
-                qwen: 'Smart OCR'
+                smart: 'Smart OCR',
+                qwen: 'Qwen2-VL'
             }[engine] || engine;
+        }
+
+        function updateVisibleControls() {
+            elements.tesseractLanguageGroup.classList.toggle('hidden', state.currentEngine !== 'tesseract');
         }
 
         async function loadEngine(engine) {
@@ -719,8 +810,10 @@
                     await ensureTrOCR();
                 } else if (engine === 'tesseract') {
                     await ensureTesseractWorker();
-                } else if (engine === 'qwen') {
+                } else if (engine === 'smart') {
                     await ensureSmartOCR();
+                } else if (engine === 'qwen') {
+                    await ensureQwen();
                 } else {
                     throw new Error(`Unknown engine: ${engine}`);
                 }
@@ -857,8 +950,11 @@
         let trocrLoadPromise = null;
         let smartOCRPipeline = null;
         let smartOCRLoadPromise = null;
-        let tesseractWorker = null;
-        let tesseractLoadPromise = null;
+        let qwenModel = null;
+        let qwenProcessor = null;
+        let qwenLoadPromise = null;
+        const tesseractWorkers = new Map();
+        const tesseractWorkerPromises = new Map();
 
         function loadScriptOnce(src) {
             const existing = document.querySelector(`script[data-src="${src}"]`);
@@ -1059,26 +1155,66 @@
             return smartOCRLoadPromise;
         }
 
-        async function ensureTesseractWorker() {
-            if (tesseractWorker) return tesseractWorker;
+        async function ensureQwen() {
+            if (qwenModel && qwenProcessor) {
+                return { model: qwenModel, processor: qwenProcessor };
+            }
 
-            if (!tesseractLoadPromise) {
-                tesseractLoadPromise = (async () => {
+            if (!state.qwenConfirmed) {
+                const approved = confirm(
+                    'Qwen2-VL is experimental in-browser and extremely large.\n\nExpected download can exceed 1.5 GB on the quantized path and may time out on slower connections.\n\nContinue loading Qwen2-VL?'
+                );
+                if (!approved) {
+                    throw new Error('Qwen2-VL loading cancelled');
+                }
+                state.qwenConfirmed = true;
+            }
+
+            if (!qwenLoadPromise) {
+                qwenLoadPromise = (async () => {
+                    const { AutoProcessor, Qwen2VLForConditionalGeneration } = await ensureTransformersModule();
+                    const modelId = 'onnx-community/Qwen2-VL-2B-Instruct';
+
+                    qwenProcessor = await AutoProcessor.from_pretrained(modelId);
+                    qwenModel = await Qwen2VLForConditionalGeneration.from_pretrained(modelId);
+
+                    return { model: qwenModel, processor: qwenProcessor };
+                })().catch((error) => {
+                    qwenLoadPromise = null;
+                    throw error;
+                });
+            }
+
+            return qwenLoadPromise;
+        }
+
+        async function ensureTesseractWorker() {
+            const language = state.tesseractLanguage;
+
+            if (tesseractWorkers.has(language)) {
+                return tesseractWorkers.get(language);
+            }
+
+            if (!tesseractWorkerPromises.has(language)) {
+                const loadPromise = (async () => {
                     await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
 
                     if (!window.Tesseract?.createWorker) {
                         throw new Error('Tesseract.js did not expose Tesseract.createWorker');
                     }
 
-                    tesseractWorker = await window.Tesseract.createWorker('eng');
-                    return tesseractWorker;
+                    const worker = await window.Tesseract.createWorker(language);
+                    tesseractWorkers.set(language, worker);
+                    return worker;
                 })().catch((error) => {
-                    tesseractLoadPromise = null;
+                    tesseractWorkerPromises.delete(language);
                     throw error;
                 });
+
+                tesseractWorkerPromises.set(language, loadPromise);
             }
 
-            return tesseractLoadPromise;
+            return tesseractWorkerPromises.get(language);
         }
 
         function normaliseTextResult(result) {
@@ -1160,7 +1296,7 @@
                 }
 
                 if (engine === 'tesseract') {
-                    updateStatusBadge('loading', 'Running Tesseract...');
+                    updateStatusBadge('loading', `Running Tesseract (${state.tesseractLanguage})...`);
                     const worker = await ensureTesseractWorker();
                     const result = await worker.recognize(imageSourceForML());
                     const text = result?.data?.text?.trim() || '';
@@ -1178,7 +1314,7 @@
                     return;
                 }
 
-                if (engine === 'qwen') {
+                if (engine === 'smart') {
                     updateStatusBadge('loading', 'Running Smart OCR...');
                     const smartOCR = await ensureSmartOCR();
                     const result = await smartOCR(imageSourceForML());
@@ -1188,6 +1324,39 @@
                     elements.copyBtn.disabled = !text;
                     state.currentBoxes = [];
                     updateStatusBadge('ready', 'Smart OCR ready');
+                    return;
+                }
+
+                if (engine === 'qwen') {
+                    updateStatusBadge('loading', 'Running Qwen2-VL...');
+                    const { RawImage } = await ensureTransformersModule();
+                    const { model, processor } = await ensureQwen();
+                    const image = await (await RawImage.read(imageSourceForML())).resize(448, 448);
+                    const conversation = [
+                        {
+                            role: 'user',
+                            content: [
+                                { type: 'image' },
+                                { type: 'text', text: 'Read all text in this image. Preserve line breaks where sensible. If there is no text, say "No text detected".' }
+                            ]
+                        }
+                    ];
+                    const textPrompt = processor.apply_chat_template(conversation, { add_generation_prompt: true });
+                    const inputs = await processor(textPrompt, image);
+                    const outputs = await model.generate({
+                        ...inputs,
+                        max_new_tokens: 256,
+                    });
+                    const decoded = processor.batch_decode(
+                        outputs.slice(null, [inputs.input_ids.dims.at(-1), null]),
+                        { skip_special_tokens: true }
+                    );
+                    const text = decoded?.[0]?.trim() || '';
+
+                    elements.outputText.value = text || 'No text detected.';
+                    elements.copyBtn.disabled = !text;
+                    state.currentBoxes = [];
+                    updateStatusBadge('ready', 'Qwen2-VL ready');
                     return;
                 }
 
@@ -1247,12 +1416,20 @@
         async function init() {
             // Load saved engine preference
             const savedEngine = localStorage.getItem('scanlocal-engine');
-            if (savedEngine && ['paddle', 'trocr', 'tesseract', 'qwen'].includes(savedEngine)) {
+            if (savedEngine && ['paddle', 'trocr', 'tesseract', 'smart', 'qwen'].includes(savedEngine)) {
                 state.currentEngine = savedEngine;
                 elements.engineTabs.forEach(tab => {
                     tab.classList.toggle('active', tab.dataset.engine === savedEngine);
                 });
             }
+
+            const savedLanguage = localStorage.getItem('scanlocal-tesseract-language');
+            if (savedLanguage) {
+                state.tesseractLanguage = savedLanguage;
+                elements.tesseractLanguage.value = savedLanguage;
+            }
+
+            updateVisibleControls();
 
             // Load the selected engine
             try {

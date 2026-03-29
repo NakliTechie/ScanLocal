@@ -8,11 +8,12 @@
 
 ## Features
 
-- **Four OCR engines** in one tool:
+- **Five OCR engines** in one tool:
   - 📜 **Default (Tesseract)** — Most reliable browser path, broad language support
   - 🚀 **Fast (PaddleOCR)** — Printed text path via Paddle models
   - ✍️ **Handwriting (TrOCR)** — SOTA for handwritten text, ~500 MB
   - 🧠 **Smart OCR** — Transformer fallback for printed text, no boxes
+  - 🔭 **Qwen2-VL (Experimental)** — Best-effort visual document reader, very large download
 
 - **100% client-side** — Your images never leave your device
 - **No dependencies** — Single HTML file, no npm, no bundler
@@ -40,9 +41,11 @@
    - **Fast** for receipts, documents, screenshots
    - **Handwriting** for handwritten notes
    - **Smart** for an alternate transformer-based read on printed text
-3. **Drop an image** or click to upload
-4. **Wait** for text extraction
-5. **Copy** the extracted text
+   - **Qwen** for experimental visual reading of complex documents
+3. **Pick a Tesseract language** if you're using the default engine
+4. **Drop an image** or click to upload
+5. **Wait** for text extraction
+6. **Copy** the extracted text
 
 ---
 
@@ -76,6 +79,7 @@ https://naklitechie.github.io/ScanLocal/
 | **OCR Engine 2** | TrOCR via Transformers.js |
 | **OCR Engine 3** | Tesseract.js v5 |
 | **OCR Engine 4** | Printed-text transformer OCR via Transformers.js |
+| **OCR Engine 5** | Qwen2-VL via Transformers.js / ONNX |
 | **UI** | Custom CSS (NakliTechie design system) |
 | **Hosting** | GitHub Pages |
 
@@ -89,6 +93,7 @@ https://naklitechie.github.io/ScanLocal/
 | PaddleOCR | ~20 MB | 2-5 sec | Instant | Printed text |
 | TrOCR | ~500 MB | 30-60 sec | Instant | Handwriting |
 | Smart OCR | ~300-500 MB | 20-60 sec | Instant | Alternate printed-text extraction |
+| Qwen2-VL | ~1.8 GB+ | Long / may time out | Cached after load | Complex visual reasoning and document reading |
 
 ---
 
@@ -97,6 +102,7 @@ https://naklitechie.github.io/ScanLocal/
 - **Images:** PNG, JPG/JPEG, WebP
 - **Max size:** 10 MB per image
 - **Languages:** 100+ (varies by engine)
+- **Tesseract languages in UI:** English, Spanish, French, German, Italian, Portuguese, Russian, Hindi, Arabic, Japanese, Korean, Chinese (Simplified)
 
 ---
 
