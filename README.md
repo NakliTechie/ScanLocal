@@ -104,6 +104,12 @@ https://naklitechie.github.io/ScanLocal/
 - **Languages:** 100+ (varies by engine)
 - **Tesseract languages in UI:** English, Spanish, French, German, Italian, Portuguese, Russian, Hindi, Arabic, Japanese, Korean, Chinese (Simplified)
 
+## Palette
+
+Coloured with **`italy-02 · PERGAMENA`** — Renaissance manuscript parchment, Vatican library. Yellowed-cream body, ink-brown text, Vatican-cobalt action accent — the place where text is preserved and read, fitting for an OCR tool.
+
+Palette pulled from [**Rangrez**](https://github.com/NakliTechie/rangrez), the global colour-palette library that backs all NakliTechie projects.
+
 ---
 
 ## Privacy
